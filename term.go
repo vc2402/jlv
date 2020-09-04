@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"regexp"
+	"strconv"
 	"strings"
 	"unicode"
 
@@ -99,6 +100,7 @@ type term struct {
 
 type command struct {
 	name      string
+	regex     string
 	optionsFn func(*term)
 	execFn    func(*term)
 }
@@ -242,6 +244,12 @@ func (t *term) selectCurrentOption() {
 
 func (t *term) processCommand(cmd []byte, length int) {
 	t.message = ""
+	if t.mode == modeRecord {
+		//TODO process records with more than screen height size
+		t.mode = modeNormal
+		t.redraw()
+		return
+	}
 	if t.options != nil {
 		if length == 1 {
 			switch cmd[0] {
@@ -289,6 +297,8 @@ func (t *term) processCommand(cmd []byte, length int) {
 			t.down()
 		case 'k':
 			t.up()
+		case 'G':
+			t.end()
 		case 'n':
 			t.search(false)
 		case 'N':
@@ -299,12 +309,7 @@ func (t *term) processCommand(cmd []byte, length int) {
 			if t.command != "" {
 				t.execute()
 			} else {
-				switch t.mode {
-				case modeNormal:
-					t.mode = modeRecord
-				case modeRecord:
-					t.mode = modeNormal
-				}
+				t.mode = modeRecord
 				t.redraw()
 			}
 
@@ -391,6 +396,24 @@ func (t *term) pgDn() {
 	}
 	t.redraw()
 }
+func (t *term) goToLine(ln int) {
+	if ln >= t.f.LinesCount() {
+		t.end()
+		return
+	}
+	if ln <= 1 {
+		t.home()
+		return
+	}
+	t.current = t.h / 2
+	newPos := ln - t.current - 1
+	if newPos < 0 {
+		newPos = 0
+		t.current = ln - 1
+	}
+	t.f.SetPosition(newPos)
+	t.redraw()
+}
 func (t *term) home() {
 	t.f.SetPosition(0)
 	t.current = 0
@@ -422,6 +445,12 @@ func (t *term) execute() {
 
 func (t *term) findCommand() *command {
 	for cl, c := range t.commands {
+		if c.regex != "" {
+			if m, _ := regexp.MatchString(c.regex, t.command); m {
+				return c
+			}
+			continue
+		}
 		if len(t.command) >= len(cl) && cl == t.command[:len(cl)] {
 			return c
 		}
@@ -625,6 +654,11 @@ func (t *term) fillCommands() {
 		name:   "search-up(?)",
 		execFn: simpleSearchExecute,
 	}
+	t.commands[":-line-numb-"] = &command{
+		name:   "goto",
+		regex:  "^:[0-9]+$",
+		execFn: goToExecute,
+	}
 }
 func filterCommandExecute(t *term) {
 	if t.command == ":fu" {
@@ -632,7 +666,7 @@ func filterCommandExecute(t *term) {
 	} else if t.command == ":fr" {
 		t.f = t.f.Top()
 	} else {
-		r := regexp.MustCompile("^f\\/([a-zA-Z]+)\\/([^\\/]*)(\\/([+!\\$-])?)?$")
+		r := regexp.MustCompile("^f\\/([a-zA-Z0-9_-]+)\\/([^\\/]*)(\\/([+!\\$-])?)?$")
 		comm := r.FindStringSubmatch(t.command[1:])
 		if comm != nil {
 			op := FOEqual
@@ -665,7 +699,7 @@ func simpleSearchExecute(t *term) {
 
 func searchCommandExecute(t *term) {
 	t.lastSearch = searchParams{idx: t.f.Position() + t.current, isRegexp: false, tag: ""}
-	r := regexp.MustCompile("^s\\/([a-zA-Z]+)\\/([^\\/]*)(\\/(\\$))?$")
+	r := regexp.MustCompile("^s\\/([a-zA-Z0-9_-]+)\\/([^\\/]*)(\\/(\\$))?$")
 	comm := r.FindStringSubmatch(t.command[1:])
 	if comm != nil {
 		if len(comm) == 5 && comm[4] != "" {
@@ -704,4 +738,9 @@ func searchCommandOptions(t *term) {
 			"/", "/",
 		)
 	}
+}
+
+func goToExecute(t *term) {
+	ln, _ := strconv.Atoi(t.command[1:])
+	t.goToLine(ln)
 }
