@@ -288,7 +288,7 @@ func (f *FileView) SetPosition(pos int) *FileView {
 //Search looks for mask in view forwards or backwards from the given line including it
 //  returns found line's index or -1 if none
 //  Search looks for mask in whole file lines, not in tags
-func (f *FileView) Search(mask string, from int, direction SearchDirection, regexp ...bool) (int, error) {
+func (f *FileView) Search(mask string, from int, direction SearchDirection, regexp ...bool) (line int, result string, err error) {
 	checkIdx := func() {
 		if from >= f.len() {
 			from = 0
@@ -301,20 +301,20 @@ func (f *FileView) Search(mask string, from int, direction SearchDirection, rege
 	for {
 		b := f.file.bytes(f.getIndex(from))
 		if b == nil {
-			return -1, errors.New("file read error")
+			return -1, "", errors.New("file read error")
 		}
-		if strings.Index(string(b), mask) != -1 {
-			return from, nil
+		if idx := strings.Index(string(b), mask); idx != -1 {
+			return from, mask, nil
 		}
 		if direction == SearchForward {
 			from++
 		} else {
 			from--
 		}
-		if start == from {
-			return -1, nil
-		}
 		checkIdx()
+		if start == from {
+			return -1, "", nil
+		}
 	}
 }
 

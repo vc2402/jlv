@@ -90,11 +90,13 @@ type term struct {
 	h          int
 	exit       bool
 	current    int
+	selMask    string
 	command    string
 	message    string
 	mode       int
 	lastSearch searchParams
 	commands   map[string]*command
+	inChan     chan []byte
 	*options
 }
 
@@ -115,19 +117,25 @@ func startTerm(file *FileView) error {
 	if err != nil {
 		return err
 	}
-	w, h, err := terminal.GetSize(d)
-	term := &term{f: file, t: f, w: w, h: h, commands: map[string]*command{}}
+	w, h, _ := terminal.GetSize(d)
+	term := &term{f: file, t: f, w: w, h: h, commands: map[string]*command{}, inChan: make(chan []byte, 256)}
 	term.fillCommands()
-	buf := make([]byte, 4)
+	// buf := make([]byte, 4)
 	term.redraw()
+	go term.inputReader()
 
 	for !term.exit {
 		suff := fmt.Sprintf("%s %d(%d)", term.f.Name(), term.current+term.f.Position()+1, file.LinesCount())
 		term.goTo(h, w-len(suff))
 		term.write(suff)
-		l, err := term.t.Read(buf)
-		if err != nil {
-			return err
+		// l, err := term.t.Read(buf)
+		// if err != nil {
+		// 	return err
+		// }
+		buf := <-term.inChan
+		l := len(buf)
+		if l == 0 {
+			return errors.New("read error")
 		}
 		term.processCommand(buf, l)
 		term.goTo(h, 1)
@@ -138,14 +146,29 @@ func startTerm(file *FileView) error {
 			term.write(term.command)
 		} else if term.message != "" {
 			term.write(term.message)
-		} else {
+		} /*else {
 			term.write(fmt.Sprintf("read: %d bytes: %v", l, buf[:l]))
-		}
+		}*/
 	}
 	defer terminal.Restore(d, s)
 	return nil
 }
 
+func (t *term) inputReader() {
+	buf := make([]byte, 4)
+
+	for !t.exit {
+		l, err := t.t.Read(buf)
+		if err != nil {
+			t.inChan <- []byte{}
+			break
+		}
+		dst := make([]byte, l)
+
+		copy(dst, buf)
+		t.inChan <- dst
+	}
+}
 func (t *term) redraw() {
 	switch t.mode {
 	case modeNormal:
@@ -165,18 +188,20 @@ func (t *term) redraw() {
 func (t *term) drawLine(n int) {
 	t.goTo(n+1, 1)
 	t.clearLine()
+	fg := fgDefault
+	bg := bgDefault
 	if t.current == n {
-		t.setColor(fgBlack, bgWhite)
+		fg = fgBlack
+		bg = bgWhite
 	}
 	m := t.f.Line(n)
 	lev := t.f.Level(m)
 	if lev == LevelInfo {
-		fg := fgGreen
-		bg := bgDefault
+		fg = fgGreen
+		bg = bgDefault
 		if t.current == n {
 			fg, bg = fgBlack, bgGreen
 		}
-		t.setColor(fg, bg)
 	}
 	if m != nil {
 		buff := strings.Builder{}
@@ -192,7 +217,19 @@ func (t *term) drawLine(n int) {
 		if found+3 < len(m) {
 			t.f.AddKnownTags(m)
 		}
-		t.write(buff.String())
+		str := buff.String()
+		t.setColor(fg, bg)
+		if t.current == n && t.selMask != "" && strings.Contains(str, t.selMask) {
+			from := strings.Index(str, t.selMask)
+			to := from + len(t.selMask)
+			t.write(str[:from])
+			t.setColor(fgWhite, bgBlack)
+			t.write(str[from:to])
+			t.setColor(fg, bg)
+			t.write(str[to:])
+		} else {
+			t.write(str)
+		}
 	}
 	t.resetColor()
 
@@ -205,7 +242,7 @@ func (t *term) showOptions() {
 	count := 0
 	for i, o := range t.options.options {
 		n := o.name
-		if pref != "" && strings.Index(n, pref) == -1 {
+		if pref != "" && !strings.Contains(n, pref) {
 			t.options.options[i].visible = false
 			continue
 		}
@@ -282,7 +319,7 @@ func (t *term) processCommand(cmd []byte, length int) {
 	}
 
 	if t.command != "" && unicode.IsPrint(rune(cmd[0])) {
-		t.command += string(cmd[:1])
+		t.command += string(cmd[:length])
 		return
 	}
 	if length == 1 {
@@ -304,7 +341,7 @@ func (t *term) processCommand(cmd []byte, length int) {
 		case 'N':
 			t.search(true)
 		case ':', '/', '?':
-			t.command = string(cmd[:1])
+			t.command = string(cmd[:length])
 		case keyEnter:
 			if t.command != "" {
 				t.execute()
@@ -488,7 +525,7 @@ func (t *term) search(changeDir bool) {
 	if t.lastSearch.tag != "" {
 		idx, err = t.f.SearchTag(t.lastSearch.tag, t.lastSearch.mask, t.lastSearch.idx, dir, t.lastSearch.isRegexp)
 	} else {
-		idx, err = t.f.Search(t.lastSearch.mask, t.lastSearch.idx, dir, t.lastSearch.isRegexp)
+		idx, t.selMask, err = t.f.Search(t.lastSearch.mask, t.lastSearch.idx, dir, t.lastSearch.isRegexp)
 	}
 	if err != nil {
 		t.message = err.Error()
@@ -666,7 +703,7 @@ func filterCommandExecute(t *term) {
 	} else if t.command == ":fr" {
 		t.f = t.f.Top()
 	} else {
-		r := regexp.MustCompile("^f\\/([a-zA-Z0-9_-]+)\\/([^\\/]*)(\\/([+!\\$-])?)?$")
+		r := regexp.MustCompile(`^f\/([a-zA-Z0-9_-]+)\/([^\/]*)(\/([+!\$-])?)?$`)
 		comm := r.FindStringSubmatch(t.command[1:])
 		if comm != nil {
 			op := FOEqual
@@ -699,7 +736,7 @@ func simpleSearchExecute(t *term) {
 
 func searchCommandExecute(t *term) {
 	t.lastSearch = searchParams{idx: t.f.Position() + t.current, isRegexp: false, tag: ""}
-	r := regexp.MustCompile("^s\\/([a-zA-Z0-9_-]+)\\/([^\\/]*)(\\/(\\$))?$")
+	r := regexp.MustCompile(`^s\/([a-zA-Z0-9_-]+)\/([^\/]*)(\/(\$))?$`)
 	comm := r.FindStringSubmatch(t.command[1:])
 	if comm != nil {
 		if len(comm) == 5 && comm[4] != "" {
@@ -714,7 +751,7 @@ func searchCommandExecute(t *term) {
 	}
 }
 func filterCommandOptions(t *term) {
-	r := regexp.MustCompile("^:f\\/([a-zA-Z0-9]*)?(\\/([a-zA-Z0-9]*))?$")
+	r := regexp.MustCompile(`^:f\/([a-zA-Z0-9]*)?(\/([a-zA-Z0-9]*))?$`)
 	comm := r.FindStringSubmatch(t.command)
 	if comm != nil {
 		if len(comm) > 2 && comm[2] != "" {
