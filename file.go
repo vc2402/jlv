@@ -368,6 +368,10 @@ func (f *File) Line(n int) map[string]interface{} {
 }
 
 func (f *File) TagName(tag Tag) string {
+	if int(tag) >= len(f.tagNames) {
+		fmt.Printf("tag is undefined: %d", tag)
+		return "--error"
+	}
 	return f.tagNames[tag]
 }
 
@@ -382,7 +386,7 @@ func (f *File) Level(m map[string]interface{}) int {
 }
 
 func (f *File) LevelName(m map[string]interface{}) string {
-	if l, ok := m[f.tagNames[TagLevel]].(string); ok {
+	if l, ok := m[f.TagName(TagLevel)].(string); ok {
 		return strings.ToLower(l)
 	}
 	return ""
