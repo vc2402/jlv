@@ -33,7 +33,7 @@ type cache struct {
 	len  int
 }
 
-//File - log file for parsing and viewing
+// File - log file for parsing and viewing
 type File struct {
 	f         *os.File
 	index     []line
@@ -43,7 +43,7 @@ type File struct {
 	tagNames  []string
 }
 
-//FileView - view on File (filtered, sorted and so on)
+// FileView - view on File (filtered, sorted and so on)
 type FileView struct {
 	file   *File
 	index  []int
@@ -69,7 +69,7 @@ const (
 	FORegexp         FilterOperator = "regexp"
 )
 
-//SearchDirection type for search functions
+// SearchDirection type for search functions
 type SearchDirection int
 
 const (
@@ -106,7 +106,7 @@ var levels = [LevelFault + 1]string{
 	LevelFaultName,
 }
 
-//well known tags
+// well known tags
 type Tag int
 
 const (
@@ -116,10 +116,16 @@ const (
 	TagOther
 )
 
+var wellKnownTagsNames = [TagOther][]string{
+	{"level", "lev", "l"},
+	{"time", "date", "datetime", "t"},
+	{"msg", "message", "m"},
+}
+
 func NewFile(f *os.File) (*File, error) {
 	fl := &File{
 		f:        f,
-		tagNames: []string{"level", "time", "msg"},
+		tagNames: []string{},
 	}
 	pos := int64(0)
 	length := 0
@@ -273,21 +279,22 @@ func (f *FileView) LevelName(m map[string]interface{}) string {
 	return f.file.LevelName(m)
 }
 
-//Move moves current position to lines lines from the current
+// Move moves current position to lines lines from the current
 func (f *FileView) Move(lines int) *FileView {
 	f.pos += lines
 	return f
 }
 
-//SetPosition sets absolute position of view
+// SetPosition sets absolute position of view
 func (f *FileView) SetPosition(pos int) *FileView {
 	f.pos = pos
 	return f
 }
 
-//Search looks for mask in view forwards or backwards from the given line including it
-//  returns found line's index or -1 if none
-//  Search looks for mask in whole file lines, not in tags
+// Search looks for mask in view forwards or backwards from the given line including it
+//
+//	returns found line's index or -1 if none
+//	Search looks for mask in whole file lines, not in tags
 func (f *FileView) Search(mask string, from int, direction SearchDirection, regexp ...bool) (line int, result string, err error) {
 	checkIdx := func() {
 		if from >= f.len() {
@@ -318,9 +325,10 @@ func (f *FileView) Search(mask string, from int, direction SearchDirection, rege
 	}
 }
 
-//SearchTag looks for mask in view forwards or backwards from the given line including it
-//  returns found line's index or -1 if none
-//  Search looks for mask in given tags only
+// SearchTag looks for mask in view forwards or backwards from the given line including it
+//
+//	returns found line's index or -1 if none
+//	Search looks for mask in given tags only
 func (f *FileView) SearchTag(tag string, mask string, from int, direction SearchDirection, regexp ...bool) (int, error) {
 	checkIdx := func() {
 		if from >= f.len() {
@@ -482,15 +490,16 @@ func (f *File) decodeLevel(lev string) int {
 	return -1
 }
 
-func (f *File) decodeTag(tag string) Tag {
-	t := TagLevel
-	for ; t < TagOther; t++ {
-		if tag == f.tagNames[t] {
-			break
-		}
-	}
-	return t
-}
+//
+//func (f *File) decodeTag(tag string) Tag {
+//	t := TagLevel
+//	for ; t < TagOther; t++ {
+//		if tag == f.tagNames[t] {
+//			break
+//		}
+//	}
+//	return t
+//}
 
 func (f *File) fillKnownTags(n int) {
 	it := f.item(n)
@@ -513,23 +522,48 @@ func (f *File) addKnownTag(tag string) {
 }
 
 func (f *File) sortKnownTags() {
-	tags := make([]string, len(f.knownTags))
-	pos := 3
-	for _, t := range f.knownTags {
-		tag := f.decodeTag(t)
-		switch tag {
-		case TagTime:
-			tags[0] = t
-		case TagLevel:
-			tags[1] = t
-		case TagMessage:
-			tags[2] = t
-		default:
-			tags[pos] = t
+	pos := 0
+	for t := TagLevel; t < TagOther; t++ {
+		if f.putStandardTag(wellKnownTagsNames[t], t) {
 			pos++
 		}
 	}
-	f.knownTags = tags
+	//for _, t := range f.knownTags {
+	//	tag := f.decodeTag(t)
+	//	switch tag {
+	//	case TagTime:
+	//		tags[0] = t
+	//	case TagLevel:
+	//		tags[1] = t
+	//	case TagMessage:
+	//		tags[2] = t
+	//	default:
+	//		tags[pos] = t
+	//		pos++
+	//	}
+	//}
+}
+
+func (f *File) putStandardTag(from []string, idx Tag) bool {
+	for _, s := range from {
+		for i, tag := range f.knownTags {
+			if s == tag {
+				if i != int(idx) {
+					f.knownTags[idx], f.knownTags[i] = f.knownTags[i], f.knownTags[idx]
+					if len(f.tagNames) <= int(idx) {
+						names := f.tagNames
+						f.tagNames = make([]string, idx+1)
+						for ni, name := range names {
+							f.tagNames[ni] = name
+						}
+					}
+					f.tagNames[idx] = s
+				}
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func (f *FileView) getIndex(i int) int {
