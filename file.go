@@ -85,6 +85,7 @@ const (
 	LevelInfoName  = "info"
 	LevelWarnName  = "warn"
 	LevelErrorName = "error"
+	LevelFatalName = "fatal"
 	LevelFaultName = "fault"
 )
 
@@ -94,8 +95,19 @@ const (
 	LevelInfo
 	LevelWarn
 	LevelError
+	LevelFatal
 	LevelFault
 )
+
+var levelColors = [...]int{
+	fgWhite,
+	fgWhite,
+	fgCyan,
+	fgYellow,
+	fgRed,
+	fgRed,
+	fgRed,
+}
 
 var levels = [LevelFault + 1]string{
 	LevelTraceName,
@@ -103,6 +115,7 @@ var levels = [LevelFault + 1]string{
 	LevelInfoName,
 	LevelWarnName,
 	LevelErrorName,
+	LevelFatalName,
 	LevelFaultName,
 }
 
@@ -554,15 +567,16 @@ func (f *File) putStandardTag(from []string, idx Tag) bool {
 			if s == tag {
 				if i != int(idx) {
 					f.knownTags[idx], f.knownTags[i] = f.knownTags[i], f.knownTags[idx]
-					if len(f.tagNames) <= int(idx) {
-						names := f.tagNames
-						f.tagNames = make([]string, idx+1)
-						for ni, name := range names {
-							f.tagNames[ni] = name
-						}
-					}
-					f.tagNames[idx] = s
 				}
+				if len(f.tagNames) <= int(idx) {
+					names := f.tagNames
+					f.tagNames = make([]string, idx+1)
+					for ni, name := range names {
+						f.tagNames[ni] = name
+					}
+				}
+				f.tagNames[idx] = s
+
 				return true
 			}
 		}

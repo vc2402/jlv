@@ -196,16 +196,23 @@ func (t *term) drawLine(n int) {
 	}
 	m := t.f.Line(n)
 	lev := t.f.Level(m)
-	if lev == LevelInfo {
-		fg = fgGreen
-		bg = bgDefault
+	if lev >= 0 && lev <= len(levelColors) {
 		if t.current == n {
-			fg, bg = fgBlack, bgGreen
+			bg = levelColors[lev] + 10
+		} else {
+			fg = levelColors[lev]
 		}
 	}
+	//if lev == LevelInfo {
+	//	fg = fgGreen
+	//	bg = bgDefault
+	//	if t.current == n {
+	//		fg, bg = fgBlack, bgGreen
+	//	}
+	//}
 	if m != nil {
 		buff := strings.Builder{}
-		buff.WriteString(fmt.Sprintf("%s %5s %s", m["time"], t.f.LevelName(m), m["msg"]))
+		buff.WriteString(fmt.Sprintf("%s %5s %s", m[t.f.TagName(TagTime)], t.f.LevelName(m), m[t.f.TagName(TagMessage)]))
 		tags := t.f.KnownTags()
 		found := 0
 		for t := 3; t < len(tags); t++ {
